@@ -8,7 +8,7 @@ const firebaseConfig = {
     projectId: "brutgamesunited2026",
     storageBucket: "brutgamesunited2026.firebasestorage.app",
     messagingSenderId: "1068840236536",
-    appId: "1:1068840236536:web:bf57c80c72cac154b8520d"
+    appId: "1:1068840236536:web:690b958309a0c52eb8520d"
 };
 
 // Initialize Firebase
