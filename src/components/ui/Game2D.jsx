@@ -1,539 +1,738 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import React, { useEffect, useRef, useCallback } from 'react';
 import useGameStore from '../../store/gameStore';
-import { storage } from '../../firebase';
-import { ref, getDownloadURL } from 'firebase/storage';
 
-/* ─────────────────────────────────────────────────────
-   SVG Soccer Ball
-   ───────────────────────────────────────────────────── */
-const SoccerBall = ({ size = 50 }) => (
-    <svg width={size} height={size} viewBox="0 0 100 100">
-        <defs>
-            <radialGradient id="bGrad" cx="38%" cy="32%" r="62%">
-                <stop offset="0%" stopColor="#fff" />
-                <stop offset="100%" stopColor="#bbb" />
-            </radialGradient>
-        </defs>
-        <circle cx="50" cy="50" r="47" fill="url(#bGrad)" stroke="#444" strokeWidth="2.5" />
-        <polygon points="50,12 61,24 56,38 44,38 39,24" fill="#222" stroke="#444" strokeWidth="0.8" />
-        <polygon points="23,40 13,54 20,68 35,66 35,48" fill="#222" stroke="#444" strokeWidth="0.8" />
-        <polygon points="77,40 87,54 80,68 65,66 65,48" fill="#222" stroke="#444" strokeWidth="0.8" />
-        <polygon points="33,78 42,91 58,91 67,78 50,69" fill="#222" stroke="#444" strokeWidth="0.8" />
-        <line x1="50" y1="12" x2="50" y2="3" stroke="#999" strokeWidth="0.6" />
-        <line x1="61" y1="24" x2="77" y2="40" stroke="#999" strokeWidth="0.6" />
-        <line x1="39" y1="24" x2="23" y2="40" stroke="#999" strokeWidth="0.6" />
-        <line x1="56" y1="38" x2="65" y2="48" stroke="#999" strokeWidth="0.6" />
-        <line x1="44" y1="38" x2="35" y2="48" stroke="#999" strokeWidth="0.6" />
-        <line x1="35" y1="66" x2="33" y2="78" stroke="#999" strokeWidth="0.6" />
-        <line x1="65" y1="66" x2="67" y2="78" stroke="#999" strokeWidth="0.6" />
-    </svg>
-);
+/* ═══════════════════════════════════════════════════════
+   Canvas-based Penalty Kick Game
+   • Sprite backgrounds + canvas field lines/ball/physics
+   • Swipe-to-shoot mechanic
+   • Keeper AI with autonomous movement
+   • Ball physics: velocity, scale shrink, rotation
+   ═══════════════════════════════════════════════════════ */
 
-/* ─────────────────────────────────────────────────────
-   Goalkeeper CSS Sprite (Large, Animated)
-   ───────────────────────────────────────────────────── */
-const Goalkeeper = ({ diveState }) => {
-    // diveState: 'idle' | 'dive-left' | 'dive-right' | 'dive-center'
-    const isDiving = diveState !== 'idle';
-    const isLeft = diveState === 'dive-left';
-    const isRight = diveState === 'dive-right';
-    const isCenter = diveState === 'dive-center';
+// Preload images
+const loadImg = (src) => {
+    const img = new Image();
+    img.src = src;
+    return img;
+};
+
+const SPRITES = {
+    bg: loadImg('/sprites/stadium_bg.png'),
+    keeperIdle: loadImg('/sprites/keeper_idle.png'),
+    keeperDiveL: loadImg('/sprites/keeper_dive_left.png'),
+    keeperDiveR: loadImg('/sprites/keeper_dive_right.png'),
+    shooter: loadImg('/sprites/shooter.png'),
+};
+
+const Game2D = () => {
+    const canvasRef = useRef(null);
+    const gameRef = useRef(null);
+    const storeRef = useRef(useGameStore.getState());
+
+    // Keep store ref updated
+    useEffect(() => {
+        const unsub = useGameStore.subscribe((s) => { storeRef.current = s; });
+        return unsub;
+    }, []);
+
+    // ── Game engine object ──────────────────────────
+    const createGame = useCallback((canvas) => {
+        const ctx = canvas.getContext('2d');
+        let w = 0, h = 0;
+        let animId = null;
+        let isRunning = false;
+
+        // ─── GAME STATE ─────────────────────────────
+        let score = 0, lives = 5, keeperSpeed = 2.5;
+        let showModal = false, modalTitle = '', modalColor = '', modalTimeout = null;
+        let gameOver = false;
+
+        // ─── GOAL geometry (recalculated on resize) ─
+        const goal = { x: 0, y: 0, w: 0, h: 0 };
+
+        // ─── KEEPER ─────────────────────────────────
+        const keeper = {
+            x: 0, w: 60, h: 80,
+            dir: 1, frame: 0,
+            state: 'idle', // idle | dive-left | dive-right
+            diveTimer: 0,
+        };
+
+        // ─── BALL ───────────────────────────────────
+        const ball = {
+            x: 0, y: 0, r: 18,
+            scale: 1, rot: 0,
+            state: 'idle', // idle | moving | scored | blocked | miss
+            vx: 0, vy: 0,
+        };
+
+        // ─── INPUT ───────────────────────────────────
+        const input = {
+            isDragging: false,
+            startX: 0, startY: 0,
+            curX: 0, curY: 0,
+        };
+
+        // ─── RESIZE ──────────────────────────────────
+        function resize() {
+            const parent = canvas.parentElement;
+            w = parent.clientWidth;
+            h = parent.clientHeight;
+            canvas.width = w;
+            canvas.height = h;
+
+            // Goal: centered, upper portion
+            goal.w = Math.min(w * 0.55, 380);
+            goal.h = h * 0.20;
+            goal.x = (w - goal.w) / 2;
+            goal.y = h * 0.24;
+
+            keeper.x = w / 2 - keeper.w / 2;
+            if (ball.state === 'idle') resetBall();
+        }
+
+        function resetBall() {
+            ball.state = 'idle';
+            ball.scale = 1;
+            ball.rot = 0;
+            ball.x = w / 2;
+            ball.y = h * 0.72;
+            ball.vx = 0;
+            ball.vy = 0;
+        }
+
+        function resetLevel() {
+            showModal = false;
+            keeper.state = 'idle';
+            keeper.diveTimer = 0;
+            resetBall();
+        }
+
+        function fullReset() {
+            score = 0;
+            lives = 5;
+            keeperSpeed = 2.5;
+            gameOver = false;
+            resetLevel();
+            updateStore();
+        }
+
+        function updateStore() {
+            // Sync with Zustand (score = goals count)
+            // We handle our own lives system internally
+        }
+
+        // ─── HANDLE SHOT RESULT ─────────────────────
+        function handleResult(type) {
+            if (type === 'goal') {
+                score += 100;
+                keeperSpeed += 0.4;
+                modalTitle = '¡GOLAZO!';
+                modalColor = '#00E676';
+                storeRef.current.recordShot(true);
+            } else {
+                lives--;
+                modalTitle = type === 'blocked' ? '¡ATAJADA!' : '¡FUERA!';
+                modalColor = '#FF5252';
+                storeRef.current.recordShot(false);
+            }
+
+            if (lives <= 0) {
+                gameOver = true;
+                modalTitle = 'FIN DEL JUEGO';
+            }
+
+            showModal = true;
+
+            // Auto-dismiss after delay
+            if (modalTimeout) clearTimeout(modalTimeout);
+            modalTimeout = setTimeout(() => {
+                if (gameOver) {
+                    // Transition to result screen
+                    storeRef.current.setView('result');
+                } else {
+                    resetLevel();
+                }
+            }, gameOver ? 2500 : 1500);
+        }
+
+        // ═══════════════════════════════════
+        //  DRAWING
+        // ═══════════════════════════════════
+
+        function drawBackground() {
+            // Stadium sprite fills background
+            if (SPRITES.bg.complete) {
+                ctx.drawImage(SPRITES.bg, 0, 0, w, h);
+            } else {
+                // Fallback grass
+                const grad = ctx.createRadialGradient(w / 2, h, h * 0.2, w / 2, h * 0.5, h);
+                grad.addColorStop(0, '#2E7D32');
+                grad.addColorStop(1, '#1B5E20');
+                ctx.fillStyle = grad;
+                ctx.fillRect(0, 0, w, h);
+            }
+        }
+
+        function drawFieldLines() {
+            const g = goal;
+            const lineW = 3;
+
+            ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+            ctx.lineWidth = lineW;
+
+            // Penalty area (big box)
+            const boxW = g.w * 1.7;
+            const boxH = g.h * 2.2;
+            const boxX = (w - boxW) / 2;
+            const boxY = g.y + g.h;
+            ctx.beginPath();
+            ctx.moveTo(boxX, boxY);
+            ctx.lineTo(boxX, boxY + boxH);
+            ctx.lineTo(boxX + boxW, boxY + boxH);
+            ctx.lineTo(boxX + boxW, boxY);
+            ctx.stroke();
+
+            // 6-yard box (small box)
+            const sBoxW = g.w * 0.8;
+            const sBoxH = g.h * 0.7;
+            const sBoxX = (w - sBoxW) / 2;
+            ctx.beginPath();
+            ctx.moveTo(sBoxX, boxY);
+            ctx.lineTo(sBoxX, boxY + sBoxH);
+            ctx.lineTo(sBoxX + sBoxW, boxY + sBoxH);
+            ctx.lineTo(sBoxX + sBoxW, boxY);
+            ctx.stroke();
+
+            // Penalty spot
+            const spotY = boxY + boxH * 0.55;
+            ctx.fillStyle = '#fff';
+            ctx.beginPath();
+            ctx.arc(w / 2, spotY, 5, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Penalty arc
+            ctx.beginPath();
+            ctx.arc(w / 2, spotY, boxW * 0.18, 0.2 * Math.PI, 0.8 * Math.PI);
+            ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+        }
+
+        function drawGoalFrame() {
+            const g = goal;
+
+            // Back net depth effect
+            const depth = g.w * 0.12;
+            ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.rect(g.x + depth / 2, g.y + depth / 3, g.w - depth, g.h - depth / 3);
+            ctx.stroke();
+
+            // Net grid
+            ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+            ctx.lineWidth = 0.8;
+            ctx.beginPath();
+            for (let i = 0; i <= 12; i++) {
+                const yy = g.y + (g.h * i / 12);
+                ctx.moveTo(g.x, yy); ctx.lineTo(g.x + g.w, yy);
+                const xx = g.x + (g.w * i / 12);
+                ctx.moveTo(xx, g.y); ctx.lineTo(xx, g.y + g.h);
+            }
+            ctx.stroke();
+
+            // Front posts (thick white)
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 7;
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            ctx.moveTo(g.x, g.y + g.h);
+            ctx.lineTo(g.x, g.y);
+            ctx.lineTo(g.x + g.w, g.y);
+            ctx.lineTo(g.x + g.w, g.y + g.h);
+            ctx.stroke();
+
+            // Goal line
+            ctx.strokeStyle = 'rgba(255,255,255,0.8)';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(g.x, g.y + g.h);
+            ctx.lineTo(g.x + g.w, g.y + g.h);
+            ctx.stroke();
+
+            ctx.lineCap = 'butt';
+        }
+
+        function drawKeeper() {
+            const g = goal;
+
+            // AI movement (side to side)
+            if (keeper.state === 'idle') {
+                keeper.x += keeperSpeed * keeper.dir;
+                if (keeper.x > g.x + g.w - keeper.w - 5) keeper.dir = -1;
+                if (keeper.x < g.x + 5) keeper.dir = 1;
+                keeper.frame++;
+            } else if (keeper.state === 'dive-left') {
+                keeper.x -= 6;
+                keeper.diveTimer++;
+            } else if (keeper.state === 'dive-right') {
+                keeper.x += 6;
+                keeper.diveTimer++;
+            }
+
+            const baseX = keeper.x + keeper.w / 2;
+            const baseY = g.y + g.h;
+
+            // Pick sprite
+            let sprite = SPRITES.keeperIdle;
+            if (keeper.state === 'dive-left') sprite = SPRITES.keeperDiveL;
+            else if (keeper.state === 'dive-right') sprite = SPRITES.keeperDiveR;
+
+            // Draw sprite
+            if (sprite.complete && sprite.naturalWidth > 0) {
+                const aspect = sprite.naturalWidth / sprite.naturalHeight;
+                const drawH = keeper.h;
+                const drawW = drawH * aspect;
+
+                ctx.save();
+                // Idle bounce animation
+                const bounceY = keeper.state === 'idle' ? Math.sin(keeper.frame * 0.12) * 3 : 0;
+                ctx.drawImage(
+                    sprite,
+                    baseX - drawW / 2,
+                    baseY - drawH + bounceY,
+                    drawW, drawH
+                );
+                ctx.restore();
+            } else {
+                // Fallback: canvas keeper
+                ctx.save();
+                // Shadow
+                ctx.fillStyle = 'rgba(0,0,0,0.3)';
+                ctx.beginPath();
+                ctx.ellipse(baseX, baseY, keeper.w / 2, 6, 0, 0, Math.PI * 2);
+                ctx.fill();
+                // Body
+                ctx.fillStyle = '#FF5252';
+                ctx.fillRect(keeper.x, baseY - keeper.h, keeper.w, keeper.h * 0.55);
+                // Shorts
+                ctx.fillStyle = '#222';
+                ctx.fillRect(keeper.x, baseY - keeper.h * 0.45, keeper.w, keeper.h * 0.45);
+                // Head
+                ctx.fillStyle = '#FFCCBC';
+                ctx.beginPath();
+                ctx.arc(baseX, baseY - keeper.h - 8, 10, 0, Math.PI * 2);
+                ctx.fill();
+                // Gloves
+                const armY = baseY - keeper.h * 0.5 + Math.sin(keeper.frame * 0.2) * 4;
+                ctx.fillStyle = '#FF9100';
+                ctx.beginPath();
+                ctx.arc(keeper.x - 6, armY, 8, 0, Math.PI * 2);
+                ctx.arc(keeper.x + keeper.w + 6, armY, 8, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+        }
+
+        function drawShooter() {
+            const sprite = SPRITES.shooter;
+            if (sprite.complete && sprite.naturalWidth > 0) {
+                const aspect = sprite.naturalWidth / sprite.naturalHeight;
+                const drawH = h * 0.28;
+                const drawW = drawH * aspect;
+                const shooterX = w * 0.25 - drawW / 2;
+                const shooterY = h - drawH - h * 0.02;
+
+                // Subtle idle sway
+                const sway = ball.state === 'idle' ? Math.sin(Date.now() * 0.002) * 2 : 0;
+
+                ctx.save();
+                ctx.translate(shooterX + drawW / 2, shooterY + drawH);
+                ctx.rotate(sway * 0.005);
+                ctx.drawImage(sprite, -drawW / 2, -drawH, drawW, drawH);
+                ctx.restore();
+            }
+        }
+
+        function drawBall() {
+            if (ball.scale <= 0) return;
+            const b = ball;
+
+            ctx.save();
+            ctx.translate(b.x, b.y);
+            ctx.scale(b.scale, b.scale);
+            ctx.rotate(b.rot);
+
+            // Shadow (moves away as ball "flies")
+            ctx.fillStyle = 'rgba(0,0,0,0.25)';
+            ctx.beginPath();
+            ctx.ellipse(0, b.r + (1 - b.scale) * 80, b.r, b.r * 0.3, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Main ball
+            ctx.beginPath();
+            ctx.arc(0, 0, b.r, 0, Math.PI * 2);
+            const grad = ctx.createRadialGradient(-b.r * 0.3, -b.r * 0.3, 0, 0, 0, b.r);
+            grad.addColorStop(0, '#ffffff');
+            grad.addColorStop(1, '#cccccc');
+            ctx.fillStyle = grad;
+            ctx.fill();
+            ctx.strokeStyle = '#555';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+
+            // Pentagon pattern
+            const pSize = b.r * 0.42;
+            ctx.fillStyle = '#222';
+            ctx.beginPath();
+            for (let i = 0; i < 5; i++) {
+                const a = (Math.PI * 2 / 5) * i - Math.PI / 2;
+                const px = Math.cos(a) * pSize;
+                const py = Math.sin(a) * pSize;
+                i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+            }
+            ctx.closePath();
+            ctx.fill();
+
+            // Smaller off-center pentagons
+            for (let j = 0; j < 5; j++) {
+                const a = (Math.PI * 2 / 5) * j;
+                const cx = Math.cos(a) * b.r * 0.65;
+                const cy = Math.sin(a) * b.r * 0.65;
+                ctx.beginPath();
+                for (let i = 0; i < 5; i++) {
+                    const pa = (Math.PI * 2 / 5) * i - Math.PI / 2;
+                    const px = cx + Math.cos(pa) * pSize * 0.45;
+                    const py = cy + Math.sin(pa) * pSize * 0.45;
+                    i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+                }
+                ctx.closePath();
+                ctx.fill();
+            }
+
+            ctx.restore();
+        }
+
+        function drawInputGuide() {
+            if (input.isDragging && ball.state === 'idle') {
+                ctx.save();
+
+                // Dashed yellow line from ball to cursor
+                ctx.beginPath();
+                ctx.moveTo(ball.x, ball.y);
+                // Invert direction: ball goes opposite to drag
+                const targetX = ball.x - (input.curX - input.startX) * 0.4;
+                const targetY = ball.y - (input.curY - input.startY) * 0.4;
+                ctx.lineTo(targetX, targetY);
+
+                const grad = ctx.createLinearGradient(ball.x, ball.y, targetX, targetY);
+                grad.addColorStop(0, 'rgba(255, 215, 0, 0.9)');
+                grad.addColorStop(1, 'rgba(255, 87, 34, 0)');
+                ctx.strokeStyle = grad;
+                ctx.lineWidth = 5;
+                ctx.setLineDash([8, 8]);
+                ctx.stroke();
+
+                // Aim dot
+                ctx.beginPath();
+                ctx.arc(targetX, targetY, 6, 0, Math.PI * 2);
+                ctx.fillStyle = '#FFD740';
+                ctx.fill();
+                ctx.strokeStyle = '#E31837';
+                ctx.lineWidth = 2;
+                ctx.setLineDash([]);
+                ctx.stroke();
+
+                ctx.restore();
+            }
+        }
+
+        function drawHUD() {
+            // Score pill
+            ctx.save();
+            ctx.fillStyle = 'rgba(0,0,0,0.65)';
+            roundRect(ctx, 14, 14, 130, 52, 16);
+            ctx.fill();
+            ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+            ctx.lineWidth = 1;
+            roundRect(ctx, 14, 14, 130, 52, 16);
+            ctx.stroke();
+
+            ctx.font = '900 20px Montserrat, sans-serif';
+            ctx.fillStyle = '#FFD740';
+            ctx.fillText(score + ' PTS', 28, 40);
+
+            ctx.font = '700 14px Montserrat, sans-serif';
+            ctx.fillStyle = '#ddd';
+            ctx.fillText('⚽ x ' + lives, 28, 58);
+            ctx.restore();
+
+            // Lives indicator (right side)
+            ctx.save();
+            for (let i = 0; i < 5; i++) {
+                const used = i >= lives;
+                ctx.beginPath();
+                ctx.arc(w - 28 - i * 26, 36, 9, 0, Math.PI * 2);
+                ctx.fillStyle = used ? 'rgba(100,100,100,0.7)' : 'rgba(255,255,255,0.9)';
+                ctx.fill();
+                ctx.strokeStyle = used ? '#555' : '#fff';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            }
+            ctx.restore();
+
+            // Instruction text
+            if (ball.state === 'idle' && !showModal) {
+                ctx.save();
+                const txt = '↕ ARRASTRA HACIA LA PORTERÍA ↕';
+                ctx.font = '700 12px Montserrat, sans-serif';
+                ctx.textAlign = 'center';
+                const tw = ctx.measureText(txt).width;
+
+                // Background pill
+                ctx.fillStyle = 'rgba(0,0,0,0.65)';
+                roundRect(ctx, w / 2 - tw / 2 - 16, h - 50, tw + 32, 30, 15);
+                ctx.fill();
+
+                ctx.fillStyle = '#fff';
+                ctx.fillText(txt, w / 2, h - 30);
+                ctx.restore();
+            }
+        }
+
+        function drawModal() {
+            if (!showModal) return;
+
+            // Overlay
+            ctx.save();
+            ctx.fillStyle = 'rgba(0,0,0,0.55)';
+            ctx.fillRect(0, 0, w, h);
+
+            // Modal card
+            const mw = Math.min(w * 0.8, 340);
+            const mh = 130;
+            const mx = (w - mw) / 2;
+            const my = (h - mh) / 2;
+
+            ctx.fillStyle = 'rgba(20,20,35,0.95)';
+            roundRect(ctx, mx, my, mw, mh, 20);
+            ctx.fill();
+            ctx.strokeStyle = modalColor;
+            ctx.lineWidth = 3;
+            roundRect(ctx, mx, my, mw, mh, 20);
+            ctx.stroke();
+
+            // Title
+            ctx.font = '900 italic 38px Montserrat, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillStyle = modalColor;
+            ctx.fillText(modalTitle, w / 2, my + 55);
+
+            // Subtitle
+            ctx.font = '600 15px Montserrat, sans-serif';
+            ctx.fillStyle = '#aaa';
+            const sub = gameOver
+                ? `Puntaje final: ${score}`
+                : `${score} PTS • ⚽ x ${lives}`;
+            ctx.fillText(sub, w / 2, my + 85);
+
+            // Dismiss hint
+            ctx.font = '500 11px Montserrat, sans-serif';
+            ctx.fillStyle = 'rgba(255,255,255,0.4)';
+            ctx.fillText(gameOver ? '' : 'Siguiente tiro...', w / 2, my + 110);
+
+            ctx.restore();
+        }
+
+        // Helper: rounded rect
+        function roundRect(c, x, y, w, h, r) {
+            c.beginPath();
+            c.moveTo(x + r, y);
+            c.lineTo(x + w - r, y);
+            c.quadraticCurveTo(x + w, y, x + w, y + r);
+            c.lineTo(x + w, y + h - r);
+            c.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+            c.lineTo(x + r, y + h);
+            c.quadraticCurveTo(x, y + h, x, y + h - r);
+            c.lineTo(x, y + r);
+            c.quadraticCurveTo(x, y, x + r, y);
+            c.closePath();
+        }
+
+        // ═══════════════════════════════════
+        //  PHYSICS & COLLISION
+        // ═══════════════════════════════════
+        function updatePhysics() {
+            if (ball.state !== 'moving') return;
+
+            ball.x += ball.vx;
+            ball.y += ball.vy;
+            ball.scale -= 0.014;
+            ball.vy += 0.4;
+            ball.rot += 0.15;
+
+            // When the ball enters the keeper's "zone" (scale 0.25-0.4)
+            if (ball.scale < 0.42 && ball.scale > 0.22) {
+                // Keeper decides to dive
+                if (keeper.state === 'idle') {
+                    const ballSide = ball.x < w / 2 ? 'left' : 'right';
+                    // Random choice: correct dive or wrong dive
+                    const r = Math.random();
+                    if (r < 0.45) {
+                        keeper.state = 'dive-' + ballSide; // correct
+                    } else if (r < 0.7) {
+                        keeper.state = 'dive-' + (ballSide === 'left' ? 'right' : 'left'); // wrong
+                    }
+                    // else: stays center
+                }
+
+                // Check collision with keeper
+                const kBaseY = goal.y + goal.h;
+                const kTopY = kBaseY - keeper.h;
+                if (
+                    ball.x > keeper.x - 10 &&
+                    ball.x < keeper.x + keeper.w + 10 &&
+                    ball.y > kTopY &&
+                    ball.y < kBaseY + 10
+                ) {
+                    ball.state = 'blocked';
+                    handleResult('blocked');
+                }
+            }
+
+            // Final determination: goal or miss (ball is "at the goal depth")
+            if (ball.scale <= 0.22 && ball.state === 'moving') {
+                if (
+                    ball.x > goal.x + 8 &&
+                    ball.x < goal.x + goal.w - 8 &&
+                    ball.y > goal.y &&
+                    ball.y < goal.y + goal.h
+                ) {
+                    ball.state = 'scored';
+                    handleResult('goal');
+                } else {
+                    ball.state = 'miss';
+                    handleResult('miss');
+                }
+            }
+        }
+
+        // ═══════════════════════════════════
+        //  GAME LOOP
+        // ═══════════════════════════════════
+        function loop() {
+            if (!isRunning) return;
+
+            ctx.clearRect(0, 0, w, h);
+
+            drawBackground();
+            drawFieldLines();
+            drawGoalFrame();
+            drawKeeper();
+            drawShooter();
+            updatePhysics();
+            drawBall();
+            drawInputGuide();
+            drawHUD();
+            drawModal();
+
+            animId = requestAnimationFrame(loop);
+        }
+
+        // ═══════════════════════════════════
+        //  INPUT HANDLERS
+        // ═══════════════════════════════════
+        function onStart(x, y) {
+            if (ball.state !== 'idle' || showModal) return;
+            input.isDragging = true;
+            input.startX = input.curX = x;
+            input.startY = input.curY = y;
+        }
+        function onMove(x, y) {
+            if (input.isDragging) {
+                input.curX = x;
+                input.curY = y;
+            }
+        }
+        function onEnd() {
+            if (!input.isDragging) return;
+            input.isDragging = false;
+
+            const dx = input.curX - input.startX;
+            const dy = input.curY - input.startY;
+            const vx = dx * 0.18;
+            const vy = dy * 0.18;
+
+            // Only shoot if user swiped upward
+            if (vy < -6) {
+                ball.state = 'moving';
+                ball.vx = vx;
+                ball.vy = vy;
+            }
+        }
+
+        // Mouse events
+        canvas.onmousedown = (e) => onStart(e.clientX, e.clientY);
+        canvas.onmousemove = (e) => onMove(e.clientX, e.clientY);
+        canvas.onmouseup = () => onEnd();
+
+        // Touch events
+        canvas.ontouchstart = (e) => { e.preventDefault(); onStart(e.touches[0].clientX, e.touches[0].clientY); };
+        canvas.ontouchmove = (e) => { e.preventDefault(); onMove(e.touches[0].clientX, e.touches[0].clientY); };
+        canvas.ontouchend = (e) => { e.preventDefault(); onEnd(); };
+
+        // Resize listener
+        const onResize = () => resize();
+        window.addEventListener('resize', onResize);
+
+        // ── Public API ──────────────────────
+        return {
+            start() {
+                isRunning = true;
+                resize();
+                fullReset();
+                loop();
+            },
+            stop() {
+                isRunning = false;
+                if (animId) cancelAnimationFrame(animId);
+                window.removeEventListener('resize', onResize);
+                canvas.onmousedown = null;
+                canvas.onmousemove = null;
+                canvas.onmouseup = null;
+                canvas.ontouchstart = null;
+                canvas.ontouchmove = null;
+                canvas.ontouchend = null;
+            }
+        };
+    }, []);
+
+    // ── Mount / Unmount ──────────────────────
+    useEffect(() => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+
+        const game = createGame(canvas);
+        gameRef.current = game;
+        game.start();
+
+        return () => {
+            game.stop();
+            gameRef.current = null;
+        };
+    }, [createGame]);
 
     return (
         <div style={{
-            position: 'relative', width: 80, height: 130,
-            transition: 'transform 0.35s cubic-bezier(.17,.67,.4,1.2)',
-            transform: isLeft
-                ? 'translateX(-65px) rotate(-25deg)'
-                : isRight
-                    ? 'translateX(65px) rotate(25deg)'
-                    : isCenter
-                        ? 'translateY(10px) scaleY(0.85)'
-                        : 'none',
-            animation: !isDiving ? 'keeperBounce 1.2s ease-in-out infinite' : 'none',
+            width: '100vw', height: '100vh', position: 'relative',
+            overflow: 'hidden', touchAction: 'none',
+            background: '#1B5E20',
         }}>
-            {/* Head */}
-            <div style={{
-                position: 'absolute', top: 0, left: '50%', transform: 'translateX(-50%)',
-                width: 28, height: 28, borderRadius: '50%',
-                background: 'linear-gradient(150deg, #f5c89a 0%, #d4a06a 100%)',
-                border: '2px solid #b8845a', zIndex: 5,
-            }}>
-                <div style={{
-                    position: 'absolute', top: -4, left: -2, right: -2, height: 16,
-                    borderRadius: '50% 50% 0 0', background: '#2a2a2a',
-                }} />
-            </div>
-
-            {/* Jersey */}
-            <div style={{
-                position: 'absolute', top: 26, left: '50%', transform: 'translateX(-50%)',
-                width: 48, height: 44, borderRadius: '8px 8px 4px 4px',
-                background: 'linear-gradient(180deg, #FFD700 0%, #FFA500 100%)',
-                border: '2px solid #cc8500', zIndex: 3,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                boxShadow: 'inset 0 -10px 15px rgba(0,0,0,0.15)',
-            }}>
-                <span style={{
-                    color: '#111', fontWeight: 900, fontSize: 22, fontFamily: 'Montserrat',
-                    textShadow: '0 1px 0 rgba(255,255,255,0.3)',
-                }}>1</span>
-            </div>
-
-            {/* Left Arm */}
-            <div style={{
-                position: 'absolute', top: 28, left: -8, width: 16, height: 40,
-                borderRadius: '8px 8px 10px 10px', zIndex: 2,
-                background: 'linear-gradient(180deg, #FFD700 0%, #FFA500 65%, #00AA44 65%)',
-                border: '2px solid #cc8500',
-                transformOrigin: 'top center',
-                transition: 'transform 0.35s cubic-bezier(.17,.67,.4,1.2)',
-                transform: isLeft ? 'rotate(-60deg) scaleY(1.2)' : isRight ? 'rotate(20deg)' : isCenter ? 'rotate(-40deg)' : 'rotate(-8deg)',
-            }} />
-
-            {/* Right Arm */}
-            <div style={{
-                position: 'absolute', top: 28, right: -8, width: 16, height: 40,
-                borderRadius: '8px 8px 10px 10px', zIndex: 2,
-                background: 'linear-gradient(180deg, #FFD700 0%, #FFA500 65%, #00AA44 65%)',
-                border: '2px solid #cc8500',
-                transformOrigin: 'top center',
-                transition: 'transform 0.35s cubic-bezier(.17,.67,.4,1.2)',
-                transform: isRight ? 'rotate(60deg) scaleY(1.2)' : isLeft ? 'rotate(-20deg)' : isCenter ? 'rotate(40deg)' : 'rotate(8deg)',
-            }} />
-
-            {/* Shorts */}
-            <div style={{
-                position: 'absolute', top: 68, left: '50%', transform: 'translateX(-50%)',
-                width: 46, height: 18, background: '#111',
-                borderRadius: '0 0 6px 6px', zIndex: 3,
-            }} />
-
-            {/* Left Leg */}
-            <div style={{
-                position: 'absolute', top: 84, left: 14, width: 14, height: 36,
-                borderRadius: '3px 3px 6px 6px', zIndex: 1,
-                background: 'linear-gradient(180deg, #FFD700 0%, #FFA500 70%, #222 70%)',
-                border: '1px solid #cc8500',
-                transition: 'transform 0.35s ease',
-                transform: isLeft ? 'rotate(-15deg) translateX(-8px)' : isRight ? 'rotate(5deg)' : 'rotate(-3deg)',
-            }} />
-
-            {/* Right Leg */}
-            <div style={{
-                position: 'absolute', top: 84, right: 14, width: 14, height: 36,
-                borderRadius: '3px 3px 6px 6px', zIndex: 1,
-                background: 'linear-gradient(180deg, #FFD700 0%, #FFA500 70%, #222 70%)',
-                border: '1px solid #cc8500',
-                transition: 'transform 0.35s ease',
-                transform: isRight ? 'rotate(15deg) translateX(8px)' : isLeft ? 'rotate(-5deg)' : 'rotate(3deg)',
-            }} />
-        </div>
-    );
-};
-
-/* ─────────────────────────────────────────────────────
-   Crosshair / Aim Cursor
-   ───────────────────────────────────────────────────── */
-const Crosshair = ({ x, y }) => (
-    <svg
-        width="44" height="44"
-        viewBox="0 0 44 44"
-        style={{
-            position: 'absolute',
-            left: x - 22, top: y - 22,
-            pointerEvents: 'none', zIndex: 30,
-            filter: 'drop-shadow(0 0 6px rgba(227,24,55,0.7))',
-        }}
-    >
-        <circle cx="22" cy="22" r="16" fill="none" stroke="#E31837" strokeWidth="2.5" />
-        <circle cx="22" cy="22" r="4" fill="#E31837" />
-        <line x1="22" y1="2" x2="22" y2="10" stroke="#E31837" strokeWidth="2" />
-        <line x1="22" y1="34" x2="22" y2="42" stroke="#E31837" strokeWidth="2" />
-        <line x1="2" y1="22" x2="10" y2="22" stroke="#E31837" strokeWidth="2" />
-        <line x1="34" y1="22" x2="42" y2="22" stroke="#E31837" strokeWidth="2" />
-    </svg>
-);
-
-/* ─────────────────────────────────────────────────────
-   Main Game Component
-   ───────────────────────────────────────────────────── */
-const Game2D = () => {
-    const { recordShot, attempts, maxAttempts, score } = useGameStore();
-    const [phase, setPhase] = useState('aiming');   // 'aiming' | 'shooting' | 'result'
-    const [shotResult, setShotResult] = useState(null);
-    const [aimPos, setAimPos] = useState(null);     // { x, y } relative to goal area
-    const [ballAnim, setBallAnim] = useState({ x: 0, y: 0, scale: 1, rotate: 0 });
-    const [keeperDive, setKeeperDive] = useState('idle');
-    const [netBulge, setNetBulge] = useState(false);
-    const [bannerLeft, setBannerLeft] = useState(null);
-    const [bannerRight, setBannerRight] = useState(null);
-
-    const goalRef = useRef(null);
-
-    // Load banners from Firebase Storage
-    useEffect(() => {
-        (async () => {
-            try {
-                setBannerLeft(await getDownloadURL(ref(storage, 'banner_left.png')));
-            } catch { /* default */ }
-            try {
-                setBannerRight(await getDownloadURL(ref(storage, 'banner_right.png')));
-            } catch { /* default */ }
-        })();
-    }, []);
-
-    // Inject keeper bounce keyframes once
-    useEffect(() => {
-        const id = 'keeper-bounce-style';
-        if (!document.getElementById(id)) {
-            const style = document.createElement('style');
-            style.id = id;
-            style.textContent = `
-                @keyframes keeperBounce {
-                    0%, 100% { transform: translateY(0); }
-                    50% { transform: translateY(-6px); }
-                }
-            `;
-            document.head.appendChild(style);
-        }
-    }, []);
-
-    /* ── Aim handler (mousemove / touchmove inside goal area) ── */
-    const handlePointerMove = useCallback((e) => {
-        if (phase !== 'aiming' || !goalRef.current) return;
-        const rect = goalRef.current.getBoundingClientRect();
-        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-        const x = Math.max(0, Math.min(rect.width, clientX - rect.left));
-        const y = Math.max(0, Math.min(rect.height, clientY - rect.top));
-        setAimPos({ x, y });
-    }, [phase]);
-
-    /* ── Shoot handler (mouseup / touchend) ─────────────────── */
-    const handleShoot = useCallback(() => {
-        if (phase !== 'aiming' || !aimPos || !goalRef.current) return;
-        setPhase('shooting');
-
-        const rect = goalRef.current.getBoundingClientRect();
-        const normX = aimPos.x / rect.width;  // 0..1
-
-        // Keeper random dive
-        const keeperZones = ['dive-left', 'dive-center', 'dive-right'];
-        const keeperChoice = keeperZones[Math.floor(Math.random() * 3)];
-        setKeeperDive(keeperChoice);
-
-        // Ball flies from bottom-center of screen to aim position inside goal
-        const targetX = aimPos.x - rect.width / 2;
-        const targetY = -(rect.height + 50);
-        setBallAnim({ x: targetX, y: targetY, scale: 0.4, rotate: 720 });
-
-        // Determine result
-        const shootZone = normX < 0.33 ? 'left' : normX > 0.66 ? 'right' : 'center';
-        const keeperZone = keeperChoice.replace('dive-', '');
-        const isGoal = shootZone !== keeperZone;
-
-        setTimeout(() => {
-            setShotResult(isGoal ? 'goal' : 'save');
-            setPhase('result');
-            recordShot(isGoal);
-
-            if (isGoal) {
-                setNetBulge(true);
-                setTimeout(() => setNetBulge(false), 600);
-            }
-
-            // Reset for next shot
-            setTimeout(() => {
-                if (attempts + 1 < maxAttempts) {
-                    setPhase('aiming');
-                    setShotResult(null);
-                    setAimPos(null);
-                    setBallAnim({ x: 0, y: 0, scale: 1, rotate: 0 });
-                    setKeeperDive('idle');
-                }
-            }, 2000);
-        }, 700);
-    }, [phase, aimPos, attempts, maxAttempts, recordShot]);
-
-    const ballStartBottom = 60; // px from bottom of pitch container
-
-    return (
-        <div
-            style={{
-                width: '100vw', height: '100vh', position: 'relative', overflow: 'hidden',
-                background: 'linear-gradient(180deg, #145a24 0%, #1d7a34 35%, #25943f 70%, #2da84a 100%)',
-                fontFamily: "'Montserrat', sans-serif", cursor: phase === 'aiming' ? 'none' : 'default',
-                touchAction: 'none',
-            }}
-            onMouseMove={handlePointerMove}
-            onTouchMove={handlePointerMove}
-            onMouseUp={handleShoot}
-            onTouchEnd={handleShoot}
-        >
-            {/* ── Grass Stripes ───────────────────────── */}
-            <div style={{
-                position: 'absolute', inset: 0, zIndex: 0, opacity: 0.12,
-                background: 'repeating-linear-gradient(180deg, transparent, transparent 50px, rgba(0,0,0,0.2) 50px, rgba(0,0,0,0.2) 100px)',
-            }} />
-
-            {/* ── HUD ─────────────────────────────────── */}
-            <div style={{
-                position: 'absolute', top: 10, left: 10, right: 10,
-                display: 'flex', justifyContent: 'space-between', alignItems: 'center', zIndex: 60,
-            }}>
-                <div style={{
-                    background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(12px)',
-                    borderRadius: 30, padding: '8px 22px',
-                    border: '2px solid #E31837', boxShadow: '0 4px 20px rgba(227,24,55,0.35)',
-                }}>
-                    <span style={{ color: '#E31837', fontWeight: 900, fontSize: 20, letterSpacing: 2 }}>
-                        GOLES: {score}
-                    </span>
-                </div>
-                <div style={{ display: 'flex', gap: 7 }}>
-                    {Array.from({ length: maxAttempts }).map((_, i) => {
-                        const used = i < attempts;
-                        return (
-                            <div key={i} style={{
-                                width: 24, height: 24, borderRadius: '50%',
-                                border: `2.5px solid ${used ? '#555' : '#0033A0'}`,
-                                background: used ? '#444' : '#fff',
-                                boxShadow: used ? 'none' : '0 0 10px rgba(0,51,160,0.5)',
-                                transition: 'all 0.3s',
-                            }} />
-                        );
-                    })}
-                </div>
-            </div>
-
-            {/* ── Ad Banners ──────────────────────────── */}
-            <div style={{
-                position: 'absolute', top: 55, left: '50%', transform: 'translateX(-50%)',
-                width: '90%', maxWidth: 720, display: 'flex', justifyContent: 'space-between', zIndex: 10,
-            }}>
-                {[{ img: bannerLeft, label: 'BANNER BRUT 1' }, { img: bannerRight, label: 'BANNER BRUT 2' }].map((b, i) => (
-                    <div key={i} style={{
-                        width: '48%', height: 48,
-                        background: b.img ? `url(${b.img}) center/cover no-repeat` : 'linear-gradient(135deg, rgba(0,51,160,0.85) 0%, rgba(0,20,80,0.95) 100%)',
-                        borderRadius: 8, border: '2px solid rgba(255,255,255,0.15)',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
-                        fontSize: 11, color: 'rgba(255,255,255,0.5)', fontWeight: 700, letterSpacing: 2,
-                    }}>
-                        {!b.img && b.label}
-                    </div>
-                ))}
-            </div>
-
-            {/* ───────────────────────────────────────────
-                 2.5D PITCH PERSPECTIVE CONTAINER
-                 ─────────────────────────────────────────── */}
-            <div style={{
-                position: 'absolute', bottom: 0, left: 0, right: 0, height: '76%',
-                perspective: '700px', perspectiveOrigin: '50% 20%',
-                display: 'flex', justifyContent: 'center', zIndex: 2,
-            }}>
-                <div style={{
-                    position: 'relative', width: '100%', maxWidth: 820, height: '100%',
-                    transformStyle: 'preserve-3d',
-                }}>
-                    {/* ── Pitch Floor (3D rotated plane) ─── */}
-                    <div style={{
-                        position: 'absolute', bottom: 0, left: '5%', right: '5%', height: '85%',
-                        background: 'linear-gradient(180deg, #1a6e2e 0%, #2d8c47 40%, #35a050 100%)',
-                        transform: 'rotateX(25deg)',
-                        transformOrigin: 'bottom center',
-                        borderTop: '4px solid rgba(255,255,255,0.35)',
-                        zIndex: 1,
-                    }}>
-                        {/* Penalty Area (large box) */}
-                        <div style={{
-                            position: 'absolute', bottom: 0, left: '15%', right: '15%', height: '60%',
-                            border: '3px solid rgba(255,255,255,0.5)',
-                            borderBottom: 'none',
-                        }} />
-                        {/* Goal Area (6-yard box) */}
-                        <div style={{
-                            position: 'absolute', bottom: 0, left: '30%', right: '30%', height: '28%',
-                            border: '3px solid rgba(255,255,255,0.5)',
-                            borderBottom: 'none',
-                        }} />
-                        {/* Penalty Spot */}
-                        <div style={{
-                            position: 'absolute', bottom: '42%', left: '50%', transform: 'translateX(-50%)',
-                            width: 11, height: 11, borderRadius: '50%',
-                            background: 'rgba(255,255,255,0.75)',
-                            boxShadow: '0 0 8px rgba(255,255,255,0.5)',
-                        }} />
-                        {/* Penalty Arc */}
-                        <div style={{
-                            position: 'absolute', bottom: '56%', left: '50%', transform: 'translateX(-50%)',
-                            width: 130, height: 55,
-                            borderRadius: '0 0 65px 65px',
-                            border: '3px solid rgba(255,255,255,0.3)',
-                            borderTop: 'none',
-                        }} />
-                    </div>
-
-                    {/* ── Goal Frame ─────────────────────── */}
-                    <div
-                        ref={goalRef}
-                        style={{
-                            position: 'absolute',
-                            bottom: '14%', left: '50%', transform: 'translateX(-50%)',
-                            width: 300, height: 150,
-                            zIndex: 8,
-                        }}
-                    >
-                        {/* Crossbar */}
-                        <div style={{
-                            position: 'absolute', top: -5, left: -8, right: -8, height: 10,
-                            background: 'linear-gradient(180deg, #fff 0%, #e0e0e0 40%, #bbb 100%)',
-                            borderRadius: 5, boxShadow: '0 3px 12px rgba(0,0,0,0.5)',
-                            zIndex: 12,
-                        }} />
-                        {/* Left Post */}
-                        <div style={{
-                            position: 'absolute', top: -5, left: -8, width: 10, height: 'calc(100% + 5px)',
-                            background: 'linear-gradient(90deg, #bbb, #fff 45%, #ccc)',
-                            borderRadius: '5px 5px 0 0',
-                            boxShadow: '-3px 0 10px rgba(0,0,0,0.3)', zIndex: 12,
-                        }} />
-                        {/* Right Post */}
-                        <div style={{
-                            position: 'absolute', top: -5, right: -8, width: 10, height: 'calc(100% + 5px)',
-                            background: 'linear-gradient(90deg, #ccc, #fff 55%, #bbb)',
-                            borderRadius: '5px 5px 0 0',
-                            boxShadow: '3px 0 10px rgba(0,0,0,0.3)', zIndex: 12,
-                        }} />
-
-                        {/* Net */}
-                        <div style={{
-                            position: 'absolute', top: 5, left: 2, right: 2, bottom: 0,
-                            backgroundColor: 'rgba(0,0,0,0.3)',
-                            background: `
-                                repeating-linear-gradient(0deg, transparent, transparent 9px, rgba(255,255,255,0.15) 9px, rgba(255,255,255,0.15) 10px),
-                                repeating-linear-gradient(90deg, transparent, transparent 9px, rgba(255,255,255,0.15) 9px, rgba(255,255,255,0.15) 10px)
-                            `,
-                            transition: 'transform 0.15s ease-out',
-                            transform: netBulge ? 'scaleX(1.06) scaleY(1.04) translateZ(8px)' : 'none',
-                            zIndex: 1,
-                        }} />
-
-                        {/* Aim Crosshair */}
-                        {phase === 'aiming' && aimPos && (
-                            <Crosshair x={aimPos.x} y={aimPos.y} />
-                        )}
-
-                        {/* Goalkeeper */}
-                        <motion.div
-                            style={{
-                                position: 'absolute', bottom: 0, left: '50%',
-                                marginLeft: -40, zIndex: 14,
-                            }}
-                        >
-                            <Goalkeeper diveState={keeperDive} />
-                        </motion.div>
-                    </div>
-
-                    {/* ── Ball Shadow ─────────────────────── */}
-                    <motion.div
-                        animate={{
-                            x: ballAnim.x,
-                            scale: phase === 'shooting' ? 0.3 : 0.8,
-                            opacity: phase === 'shooting' ? 0.3 : 0.6,
-                        }}
-                        transition={{ duration: 0.65, ease: 'easeOut' }}
-                        style={{
-                            position: 'absolute', bottom: ballStartBottom - 8,
-                            left: '50%', marginLeft: -20,
-                            width: 40, height: 12, borderRadius: '50%',
-                            background: 'radial-gradient(ellipse, rgba(0,0,0,0.5) 0%, transparent 70%)',
-                            zIndex: 5,
-                        }}
-                    />
-
-                    {/* ── Soccer Ball ─────────────────────── */}
-                    <motion.div
-                        initial={{ x: 0, y: 0, scale: 1, rotate: 0 }}
-                        animate={{
-                            x: ballAnim.x,
-                            y: ballAnim.y,
-                            scale: ballAnim.scale,
-                            rotate: ballAnim.rotate,
-                        }}
-                        transition={{
-                            duration: 0.65, ease: 'easeOut',
-                            rotate: { duration: 0.65, ease: 'linear' },
-                        }}
-                        style={{
-                            position: 'absolute',
-                            bottom: ballStartBottom,
-                            left: '50%', marginLeft: -25,
-                            zIndex: 25,
-                            filter: 'drop-shadow(0 6px 10px rgba(0,0,0,0.5))',
-                        }}
-                    >
-                        <SoccerBall size={50} />
-                    </motion.div>
-
-                    {/* ── Instruction ─────────────────────── */}
-                    {phase === 'aiming' && (
-                        <motion.div
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            style={{
-                                position: 'absolute', bottom: 10, left: 0, right: 0,
-                                textAlign: 'center', zIndex: 35,
-                                color: 'rgba(255,255,255,0.85)', fontSize: 14,
-                                letterSpacing: 3, textTransform: 'uppercase', fontWeight: 700,
-                                textShadow: '0 2px 8px rgba(0,0,0,0.9)',
-                            }}
-                        >
-                            {aimPos ? '¡Suelta para disparar! 🎯' : 'Apunta dentro de la portería y suelta ⚽'}
-                        </motion.div>
-                    )}
-                </div>
-            </div>
-
-            {/* ── RESULT OVERLAY ──────────────────────── */}
-            <AnimatePresence>
-                {phase === 'result' && (
-                    <motion.div
-                        initial={{ scale: 0, opacity: 0 }}
-                        animate={{ scale: 1, opacity: 1 }}
-                        exit={{ scale: 0, opacity: 0 }}
-                        transition={{ type: 'spring', stiffness: 350, damping: 22 }}
-                        style={{
-                            position: 'absolute', inset: 0, zIndex: 100,
-                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            pointerEvents: 'none',
-                        }}
-                    >
-                        <div style={{
-                            padding: '20px 60px', borderRadius: 24,
-                            background: shotResult === 'goal'
-                                ? 'linear-gradient(135deg, rgba(227,24,55,0.9), rgba(180,10,40,0.95))'
-                                : 'linear-gradient(135deg, rgba(0,0,0,0.85), rgba(30,30,30,0.9))',
-                            backdropFilter: 'blur(10px)',
-                            border: `3px solid ${shotResult === 'goal' ? '#ff6688' : '#555'}`,
-                            boxShadow: shotResult === 'goal'
-                                ? '0 0 50px rgba(227,24,55,0.5), 0 0 100px rgba(227,24,55,0.2)'
-                                : '0 0 40px rgba(0,0,0,0.6)',
-                        }}>
-                            <h2 style={{
-                                fontSize: 56, fontWeight: 900, fontStyle: 'italic',
-                                textTransform: 'uppercase', color: '#fff', margin: 0,
-                                textShadow: '0 4px 12px rgba(0,0,0,0.6)', letterSpacing: 4,
-                            }}>
-                                {shotResult === 'goal' ? '¡GOOOL!' : '¡ATAJADA!'}
-                            </h2>
-                        </div>
-                    </motion.div>
-                )}
-            </AnimatePresence>
+            <canvas
+                ref={canvasRef}
+                style={{ display: 'block', width: '100%', height: '100%' }}
+            />
         </div>
     );
 };
