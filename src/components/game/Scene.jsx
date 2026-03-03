@@ -6,6 +6,7 @@ import Pitch from './Pitch';
 import Goal from './Goal';
 import Ball from './Ball';
 import Keeper from './Keeper';
+import Shooter from './Shooter';
 
 export default function Scene({ gameState, setGameState, setScore, setLives }) {
     return (
@@ -41,10 +42,13 @@ export default function Scene({ gameState, setGameState, setScore, setLives }) {
                     {/* AI Keeper */}
                     {gameState === 'playing' && <Keeper />}
 
+                    {/* Shooter / Player Character */}
+                    {gameState === 'playing' && <Shooter position={[0, 0, 3.8]} />}
+
                     {/* Only render ball when actively playing to allow resets */}
                     {gameState === 'playing' && (
                         <Ball
-                            position={[0, 0.12, 3]}
+                            position={[0, 0.15, 3]}
                             onGoal={() => {
                                 setScore(s => s + 100);
                                 setTimeout(() => setGameState('playing_reset'), 1000); // Trigger a re-mount

@@ -8,8 +8,7 @@ export default function Keeper({ position }) {
     useFrame((state) => {
         if (keeperRef.current) {
             const time = state.clock.getElapsedTime();
-            // Increase speed over time slightly or keep it constant.
-            // Ping pong motion between the goal posts (approx -2.5 to 2.5)
+            // Ping pong motion between the goal posts
             const x = Math.sin(time * 2.5) * 2.8;
 
             // Update kinematic position instantly
@@ -19,38 +18,98 @@ export default function Keeper({ position }) {
 
     return (
         <RigidBody ref={keeperRef} type="kinematicPosition" colliders={false} restitution={0.2} friction={0}>
-            <CuboidCollider args={[0.8, 0.9, 0.2]} position={[0, 0.9, 0]} />
+            {/* Slightly wider collider to account for active pose */}
+            <CuboidCollider args={[0.9, 0.9, 0.25]} position={[0, 0.9, 0]} />
             <group position={[0, 0, 0]}>
                 {/* Head */}
-                <mesh position={[0, 1.7, 0]} castShadow>
+                <mesh position={[0, 1.7, 0.05]} castShadow>
                     <sphereGeometry args={[0.2, 16, 16]} />
                     <meshStandardMaterial color="#FFCCBC" roughness={0.6} />
                 </mesh>
-                {/* Torso (Jersey) */}
-                <mesh position={[0, 1.1, 0]} castShadow>
+
+                {/* Torso (Cyan Jersey) */}
+                <mesh position={[0, 1.1, 0]} castShadow rotation={[0.05, 0, 0]}>
                     <boxGeometry args={[0.6, 0.8, 0.3]} />
-                    <meshStandardMaterial color="#FF5252" roughness={0.7} />
+                    <meshStandardMaterial color="#00E5FF" roughness={0.7} />
                 </mesh>
-                {/* Left Arm */}
-                <mesh position={[-0.4, 1.1, 0]} castShadow rotation={[0, 0, 0.2]}>
-                    <boxGeometry args={[0.2, 0.8, 0.2]} />
-                    <meshStandardMaterial color="#FF5252" roughness={0.7} />
+
+                {/* Shorts (Black) */}
+                <mesh position={[0, 0.55, 0]} castShadow>
+                    <boxGeometry args={[0.6, 0.35, 0.32]} />
+                    <meshStandardMaterial color="#111111" roughness={0.8} />
                 </mesh>
-                {/* Right Arm */}
-                <mesh position={[0.4, 1.1, 0]} castShadow rotation={[0, 0, -0.2]}>
-                    <boxGeometry args={[0.2, 0.8, 0.2]} />
-                    <meshStandardMaterial color="#FF5252" roughness={0.7} />
-                </mesh>
-                {/* Left Leg */}
-                <mesh position={[-0.15, 0.35, 0]} castShadow>
-                    <boxGeometry args={[0.25, 0.7, 0.25]} />
-                    <meshStandardMaterial color="#1B1B1B" roughness={0.7} />
-                </mesh>
-                {/* Right Leg */}
-                <mesh position={[0.15, 0.35, 0]} castShadow>
-                    <boxGeometry args={[0.25, 0.7, 0.25]} />
-                    <meshStandardMaterial color="#1B1B1B" roughness={0.7} />
-                </mesh>
+
+                {/* Left Arm (Bent ready to dive) */}
+                <group position={[-0.4, 1.3, 0]} rotation={[0, 0, 0.5]}>
+                    <mesh position={[0, -0.3, 0]} castShadow>
+                        <boxGeometry args={[0.18, 0.6, 0.18]} />
+                        <meshStandardMaterial color="#FFCCBC" roughness={0.6} />
+                    </mesh>
+                    {/* Left Sleeve */}
+                    <mesh position={[0, -0.1, 0]} castShadow>
+                        <boxGeometry args={[0.22, 0.3, 0.22]} />
+                        <meshStandardMaterial color="#00E5FF" roughness={0.7} />
+                    </mesh>
+                    {/* Left Glove */}
+                    <mesh position={[0, -0.65, 0]} castShadow>
+                        <boxGeometry args={[0.25, 0.25, 0.25]} />
+                        <meshStandardMaterial color="#ECEFF1" roughness={0.5} />
+                    </mesh>
+                </group>
+
+                {/* Right Arm (Bent ready to dive) */}
+                <group position={[0.4, 1.3, 0]} rotation={[0, 0, -0.5]}>
+                    <mesh position={[0, -0.3, 0]} castShadow>
+                        <boxGeometry args={[0.18, 0.6, 0.18]} />
+                        <meshStandardMaterial color="#FFCCBC" roughness={0.6} />
+                    </mesh>
+                    {/* Right Sleeve */}
+                    <mesh position={[0, -0.1, 0]} castShadow>
+                        <boxGeometry args={[0.22, 0.3, 0.22]} />
+                        <meshStandardMaterial color="#00E5FF" roughness={0.7} />
+                    </mesh>
+                    {/* Right Glove */}
+                    <mesh position={[0, -0.65, 0]} castShadow>
+                        <boxGeometry args={[0.25, 0.25, 0.25]} />
+                        <meshStandardMaterial color="#ECEFF1" roughness={0.5} />
+                    </mesh>
+                </group>
+
+                {/* Left Leg (Spread) */}
+                <group position={[-0.2, 0.35, 0]} rotation={[0, 0, -0.2]}>
+                    <mesh position={[0, -0.15, 0]} castShadow>
+                        <boxGeometry args={[0.2, 0.4, 0.2]} />
+                        <meshStandardMaterial color="#FFCCBC" roughness={0.6} />
+                    </mesh>
+                    {/* Left Sock */}
+                    <mesh position={[0, -0.3, 0]} castShadow>
+                        <boxGeometry args={[0.22, 0.4, 0.22]} />
+                        <meshStandardMaterial color="#ECEFF1" roughness={0.8} />
+                    </mesh>
+                    {/* Left Shoe */}
+                    <mesh position={[0, -0.5, 0.05]} castShadow>
+                        <boxGeometry args={[0.22, 0.12, 0.3]} />
+                        <meshStandardMaterial color="#111111" roughness={0.5} />
+                    </mesh>
+                </group>
+
+                {/* Right Leg (Spread) */}
+                <group position={[0.2, 0.35, 0]} rotation={[0, 0, 0.2]}>
+                    <mesh position={[0, -0.15, 0]} castShadow>
+                        <boxGeometry args={[0.2, 0.4, 0.2]} />
+                        <meshStandardMaterial color="#FFCCBC" roughness={0.6} />
+                    </mesh>
+                    {/* Right Sock */}
+                    <mesh position={[0, -0.3, 0]} castShadow>
+                        <boxGeometry args={[0.22, 0.4, 0.22]} />
+                        <meshStandardMaterial color="#ECEFF1" roughness={0.8} />
+                    </mesh>
+                    {/* Right Shoe */}
+                    <mesh position={[0, -0.5, 0.05]} castShadow>
+                        <boxGeometry args={[0.22, 0.12, 0.3]} />
+                        <meshStandardMaterial color="#111111" roughness={0.5} />
+                    </mesh>
+                </group>
             </group>
         </RigidBody>
     );
