@@ -19,12 +19,39 @@ export default function Keeper({ position }) {
 
     return (
         <RigidBody ref={keeperRef} type="kinematicPosition" colliders={false} restitution={0.2} friction={0}>
-            <CuboidCollider args={[0.5, 0.9, 0.2]} />
-            <mesh castShadow receiveShadow>
-                {/* Simple Red Jersey Body */}
-                <boxGeometry args={[1.0, 1.8, 0.4]} />
-                <meshStandardMaterial color="#FF5252" roughness={0.7} />
-            </mesh>
+            <CuboidCollider args={[0.8, 0.9, 0.2]} position={[0, 0.9, 0]} />
+            <group position={[0, 0, 0]}>
+                {/* Head */}
+                <mesh position={[0, 1.7, 0]} castShadow>
+                    <sphereGeometry args={[0.2, 16, 16]} />
+                    <meshStandardMaterial color="#FFCCBC" roughness={0.6} />
+                </mesh>
+                {/* Torso (Jersey) */}
+                <mesh position={[0, 1.1, 0]} castShadow>
+                    <boxGeometry args={[0.6, 0.8, 0.3]} />
+                    <meshStandardMaterial color="#FF5252" roughness={0.7} />
+                </mesh>
+                {/* Left Arm */}
+                <mesh position={[-0.4, 1.1, 0]} castShadow rotation={[0, 0, 0.2]}>
+                    <boxGeometry args={[0.2, 0.8, 0.2]} />
+                    <meshStandardMaterial color="#FF5252" roughness={0.7} />
+                </mesh>
+                {/* Right Arm */}
+                <mesh position={[0.4, 1.1, 0]} castShadow rotation={[0, 0, -0.2]}>
+                    <boxGeometry args={[0.2, 0.8, 0.2]} />
+                    <meshStandardMaterial color="#FF5252" roughness={0.7} />
+                </mesh>
+                {/* Left Leg */}
+                <mesh position={[-0.15, 0.35, 0]} castShadow>
+                    <boxGeometry args={[0.25, 0.7, 0.25]} />
+                    <meshStandardMaterial color="#1B1B1B" roughness={0.7} />
+                </mesh>
+                {/* Right Leg */}
+                <mesh position={[0.15, 0.35, 0]} castShadow>
+                    <boxGeometry args={[0.25, 0.7, 0.25]} />
+                    <meshStandardMaterial color="#1B1B1B" roughness={0.7} />
+                </mesh>
+            </group>
         </RigidBody>
     );
 }
