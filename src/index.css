@@ -1,99 +1,166 @@
 @import "tailwindcss";
 
 @theme {
-  --color-primary: #00E676;
-  --color-primary-dark: #00C853;
-  --color-secondary: #2979FF;
-  --color-accent: #FFD740;
-  --color-dark-bg: #1A1A2E;
-  --font-sans: 'Montserrat', sans-serif;
+    /* BRUT Panama Theme */
+    --color-primary: #E31837;
+    /* Panama Red */
+    --color-primary-dark: #C1122C;
+    --color-secondary: #0033A0;
+    /* Panama Royal Blue */
+    --color-accent: #FFFFFF;
+    /* White */
+    --color-dark-bg: #111111;
+    /* Very dark background for contrast */
+    --font-sans: 'Montserrat', sans-serif;
 }
 
 @layer base {
-  body {
-    background-color: var(--color-dark-bg);
-    margin: 0;
-    padding: 0;
-    font-family: var(--font-sans);
-    -webkit-font-smoothing: antialiased;
-    color: white;
-    user-select: none;
-    overflow: hidden;
-    touch-action: none;
-  }
+    body {
+        background-color: var(--color-dark-bg);
+        margin: 0;
+        padding: 0;
+        font-family: var(--font-sans);
+        -webkit-font-smoothing: antialiased;
+        color: white;
+        user-select: none;
+        overflow: hidden;
+        touch-action: none;
+        /* Crucial for swipe gestures without scrolling */
+    }
 }
 
 @layer components {
 
-  /* Glassmorphism Classes */
-  .glass-panel {
-    background-color: rgb(22 33 62 / 0.85);
-    backdrop-filter: blur(12px);
-    border-radius: 1.5rem;
-    border: 1px solid rgb(255 255 255 / 0.2);
-    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
-  }
+    /* UI Utilities */
+    .flex-center {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+    }
 
-  .glass-input {
-    width: 100%;
-    padding: 1rem;
-    margin: 0.5rem 0;
-    border-radius: 0.75rem;
-    border: 2px solid transparent;
-    background-color: rgb(255 255 255 / 0.05);
-    color: white;
-    transition: all 0.3s;
-  }
+    .screen-container {
+        width: 100vw;
+        height: 100vh;
+        padding: 2rem;
+        position: relative;
+        overflow: hidden;
+    }
 
-  .glass-input:focus {
-    outline: none;
-    border-color: var(--color-primary);
-    background-color: rgb(255 255 255 / 0.1);
-  }
+    /* Glassmorphism Classes */
+    .glass-panel {
+        background-color: rgb(0 0 0 / 0.6);
+        backdrop-filter: blur(12px);
+        border-radius: 1.5rem;
+        border: 1px solid rgb(255 255 255 / 0.1);
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.8);
+        padding: 2rem;
+        text-align: center;
+    }
 
-  .btn {
-    width: 100%;
-    padding: 1rem;
-    margin-top: 1rem;
-    border-radius: 0.75rem;
-    font-size: 1rem;
-    font-weight: 800;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    cursor: pointer;
-    transition: transform 0.1s, box-shadow 0.2s;
-    position: relative;
-    overflow: hidden;
-    text-align: center;
-  }
+    /* Buttons */
+    .button-brut {
+        background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-dark) 100%);
+        color: white;
+        border: none;
+        padding: 1.2rem 3rem;
+        font-size: 1.5rem;
+        font-weight: 900;
+        text-transform: uppercase;
+        border-radius: 50px;
+        cursor: pointer;
+        box-shadow: 0 6px 20px rgba(227, 24, 55, 0.5);
+        letter-spacing: 2px;
+    }
 
-  .btn:active {
-    transform: scale(0.96);
-  }
+    .button-alt {
+        background: linear-gradient(135deg, var(--color-secondary) 0%, #002277 100%);
+        color: white;
+        border: none;
+        padding: 1rem 2.5rem;
+        font-size: 1.2rem;
+        font-weight: 800;
+        text-transform: uppercase;
+        border-radius: 50px;
+        cursor: pointer;
+        box-shadow: 0 4px 15px rgba(0, 51, 160, 0.4);
+        letter-spacing: 1px;
+    }
 
-  .btn-primary {
-    background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-dark) 100%);
-    color: #003300;
-    box-shadow: 0 4px 15px rgba(0, 230, 118, 0.4);
-  }
+    /* Typography */
+    .brut-logo {
+        font-size: 5rem;
+        font-weight: 900;
+        font-style: italic;
+        text-transform: uppercase;
+        letter-spacing: -2px;
+        background: linear-gradient(to right, white, #cccccc);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        margin-bottom: 0;
+        line-height: 1;
+    }
 
-  .btn-secondary {
-    background-color: rgb(255 255 255 / 0.1);
-    color: white;
-    border: 1px solid rgb(255 255 255 / 0.2);
-  }
+    .brut-subtitle {
+        font-size: 1.5rem;
+        font-weight: 700;
+        color: var(--color-primary);
+        letter-spacing: 4px;
+        text-transform: uppercase;
+        margin-bottom: 2rem;
+    }
 
-  .btn-accent {
-    background: linear-gradient(135deg, var(--color-accent) 0%, #FFB300 100%);
-    color: black;
-  }
+    h2 {
+        font-size: 2rem;
+        font-weight: 800;
+        margin-bottom: 1rem;
+    }
 
-  .title-text {
-    font-weight: 900;
-    font-style: italic;
-    text-transform: uppercase;
-    background: linear-gradient(to right, #fff, var(--color-primary));
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-  }
+    h3 {
+        font-size: 1.5rem;
+        font-weight: 700;
+        margin-bottom: 1rem;
+        color: var(--color-secondary);
+    }
+
+    /* Layout Helpers */
+    .mt-4 {
+        margin-top: 1rem;
+    }
+
+    .mt-8 {
+        margin-top: 2rem;
+    }
+
+    /* Result Screen specifics */
+    .final-score {
+        font-size: 6rem;
+        font-weight: 900;
+        display: flex;
+        align-items: baseline;
+        justify-content: center;
+        color: var(--color-primary);
+    }
+
+    .score-divider {
+        font-size: 3rem;
+        color: #666;
+        margin: 0 0.5rem;
+    }
+
+    .score-max {
+        font-size: 3rem;
+        color: #999;
+    }
+
+    .redeem-box {
+        background-color: var(--color-primary);
+        color: white;
+        padding: 1rem;
+        border-radius: 8px;
+        margin-top: 1.5rem;
+        font-weight: 800;
+        font-size: 1.1rem;
+        letter-spacing: 1px;
+    }
 }
