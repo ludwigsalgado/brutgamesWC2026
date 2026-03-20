@@ -5,14 +5,14 @@ import { Trophy, RotateCcw, Target } from 'lucide-react';
 // Game Constants
 const CANVAS_WIDTH = 800;
 const CANVAS_HEIGHT = 600;
-const GOAL_WIDTH = 220; // Tightened to match visible goal posts
-const GOAL_HEIGHT = 110; // Tightened to match visible crossbar
+const GOAL_WIDTH = 250; // Adjusted for new background
+const GOAL_HEIGHT = 125; // Adjusted for new background
 const BALL_RADIUS = 16;
-const KEEPER_WIDTH = 40; // Reduced from 60
-const KEEPER_HEIGHT = 65; // Reduced from 90
+const KEEPER_WIDTH = 40;
+const KEEPER_HEIGHT = 65;
 const TOTAL_SHOTS = 5;
 const GOAL_Z = 600;
-const HORIZON_Y = 275;
+const HORIZON_Y = 380; // Adjusted to match the goal line in the new image
 const WALL_Z = 200; // Position of the wall
 const WALL_PLAYER_WIDTH = 35;
 const WALL_PLAYER_HEIGHT = 80;
@@ -187,7 +187,7 @@ export default function PenaltyGame() {
 
   useEffect(() => {
     // Simulated fetch from Firebase Storage
-    setBannerUrl('/sprites/brut_banner.png');
+    setBannerUrl('/sprites/banner_final.jpg');
   }, []);
 
   // Main Game Loop
@@ -518,10 +518,10 @@ export default function PenaltyGame() {
       <div className="w-full max-w-[800px] flex justify-between items-center mb-4 text-white">
         <div className="flex items-center gap-2">
           <Trophy className="text-[#FFD700]" size={24} />
-          <span className="font-extrabold text-xl tracking-tighter">BRUT <span className="text-[#E31837]">2026</span></span>
+          <span className="font-extrabold text-xl tracking-tighter">BRUT <span className="text-[#E31837]">MUNDIAL EXPERIENCE</span></span>
         </div>
         <div className="text-sm font-medium opacity-80 uppercase tracking-widest text-right">
-          Copa Mundial<br />Experience
+          Brut Mundial<br />Experience
         </div>
       </div>
 
