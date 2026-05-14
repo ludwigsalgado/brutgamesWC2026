@@ -1,6 +1,8 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Trophy, RotateCcw, Target } from 'lucide-react';
+import { activeConfig } from '../config/client.config';
+import { useSfx } from '../hooks/useSfx';
 
 // Game Constants
 const CANVAS_WIDTH = 800;
@@ -10,7 +12,7 @@ const GOAL_HEIGHT = 125; // Adjusted for new background
 const BALL_RADIUS = 16;
 const KEEPER_WIDTH = 40;
 const KEEPER_HEIGHT = 65;
-const TOTAL_SHOTS = 5;
+const TOTAL_SHOTS = activeConfig.game.totalShots;
 const GOAL_Z = 600;
 const HORIZON_Y = 380; // Adjusted to match the goal line in the new image
 const WALL_Z = 200; // Position of the wall
@@ -54,12 +56,12 @@ const loadImg = (src: string) => {
 };
 
 const SPRITES = {
-  bg: loadImg('/sprites/stadium_bg.png'),
-  keeperIdle: loadImg('/sprites/keeper_idle.png'),
-  keeperDiveL: loadImg('/sprites/keeper_dive_left.png'),
-  keeperDiveR: loadImg('/sprites/keeper_dive_right.png'),
-  shooter: loadImg('/sprites/shooter.png'),
-  defender: loadImg('/sprites/defender.png'),
+  bg: loadImg(activeConfig.assets.stadiumBgPath),
+  keeperIdle: loadImg(activeConfig.assets.sprites.keeperIdle),
+  keeperDiveL: loadImg(activeConfig.assets.sprites.keeperDiveLeft),
+  keeperDiveR: loadImg(activeConfig.assets.sprites.keeperDiveRight),
+  shooter: loadImg(activeConfig.assets.sprites.shooter),
+  defender: loadImg(activeConfig.assets.sprites.defender),
 };
 
 const AdBanner: React.FC<{ imageUrl: string }> = ({ imageUrl }) => (
@@ -91,10 +93,15 @@ export default function PenaltyGame() {
   const [score, setScore] = useState(0);
   const [shotsTaken, setShotsTaken] = useState(0);
   const [result, setResult] = useState<ResultType>(null);
-  const [mousePos, setMousePos] = useState({ x: CANVAS_WIDTH / 2, y: CANVAS_HEIGHT / 2 });
+  const mousePosRef = useRef({ x: CANVAS_WIDTH / 2, y: CANVAS_HEIGHT / 2 });
   const [netShake, setNetShake] = useState(0);
   const [bannerUrl, setBannerUrl] = useState<string | null>(null);
   const [isGameStarted, setIsGameStarted] = useState(false);
+
+  // SFX
+  const { play: playSfx } = useSfx();
+  const sfxRef = useRef(playSfx);  // stable ref for render loop access
+  sfxRef.current = playSfx;
 
   // Refs for mutable game objects
   const ballRef = useRef<Ball>({ x: CANVAS_WIDTH / 2, y: 560, z: 0, vx: 0, vy: 0, vz: 0, rotation: 0 });
@@ -138,8 +145,8 @@ export default function PenaltyGame() {
   const handleShoot = () => {
     if (!isGameStarted || gameState !== 'AIMING') return;
 
-    const targetX = mousePos.x;
-    const targetY = mousePos.y;
+    const targetX = mousePosRef.current.x;
+    const targetY = mousePosRef.current.y;
     const framesToGoal = 50;
 
     ballRef.current.vx = (targetX - CANVAS_WIDTH / 2) / framesToGoal;
@@ -147,7 +154,7 @@ export default function PenaltyGame() {
     ballRef.current.vy = (dy - 0.5 * GRAVITY * (framesToGoal * framesToGoal)) / framesToGoal;
     ballRef.current.vz = GOAL_Z / framesToGoal;
 
-    const difficulty = 0.8;
+    const difficulty = activeConfig.game.keeperDifficulty;
     const error = (Math.random() - 0.5) * 200 * (1 - difficulty);
     keeperRef.current.targetX = targetX + error;
 
@@ -162,6 +169,7 @@ export default function PenaltyGame() {
       keeperRef.current.state = 'IDLE';
     }
 
+    sfxRef.current('/sfx/kick.wav', 0.8);
     setGameState('KICKING');
   };
 
@@ -187,7 +195,7 @@ export default function PenaltyGame() {
 
   useEffect(() => {
     // Simulated fetch from Firebase Storage
-    setBannerUrl('/sprites/banner_final.jpg');
+    setBannerUrl(activeConfig.assets.sponsorBannerPath);
   }, []);
 
   // Main Game Loop
@@ -276,9 +284,15 @@ export default function PenaltyGame() {
           setGameState('RESULT');
           setShotsTaken(prev => prev + 1);
 
+          // Play result SFX
           if (newResult === 'GOAL') {
+            sfxRef.current('/sfx/goal.wav', 0.8);
             setScore(prev => prev + 1);
             setNetShake(10);
+          } else if (newResult === 'SAVED') {
+            sfxRef.current('/sfx/save.wav', 0.7);
+          } else {
+            sfxRef.current('/sfx/miss.wav', 0.7);
           }
         }
       }
@@ -363,29 +377,29 @@ export default function PenaltyGame() {
       // --- 6. Aiming Target ---
       if (gameState === 'AIMING') {
         const pulse = 1 + Math.sin(Date.now() / 200) * 0.1;
-        ctx.strokeStyle = '#E31837'; // Brut Red
+        ctx.strokeStyle = activeConfig.colors.primary;
         ctx.lineWidth = 3;
         ctx.beginPath();
-        ctx.arc(mousePos.x, mousePos.y, 25 * pulse, 0, Math.PI * 2);
+        ctx.arc(mousePosRef.current.x, mousePosRef.current.y, 25 * pulse, 0, Math.PI * 2);
         ctx.stroke();
         ctx.strokeStyle = 'white';
         ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.arc(mousePos.x, mousePos.y, 15 * pulse, 0, Math.PI * 2);
+        ctx.arc(mousePosRef.current.x, mousePosRef.current.y, 15 * pulse, 0, Math.PI * 2);
         ctx.stroke();
 
         ctx.beginPath();
-        ctx.moveTo(mousePos.x - 30, mousePos.y);
-        ctx.lineTo(mousePos.x + 30, mousePos.y);
-        ctx.moveTo(mousePos.x, mousePos.y - 30);
-        ctx.lineTo(mousePos.x, mousePos.y + 30);
+        ctx.moveTo(mousePosRef.current.x - 30, mousePosRef.current.y);
+        ctx.lineTo(mousePosRef.current.x + 30, mousePosRef.current.y);
+        ctx.moveTo(mousePosRef.current.x, mousePosRef.current.y - 30);
+        ctx.lineTo(mousePosRef.current.x, mousePosRef.current.y + 30);
         ctx.stroke();
 
         ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
         ctx.setLineDash([8, 8]);
         ctx.beginPath();
         ctx.moveTo(ball.x, ball.y);
-        ctx.lineTo(mousePos.x, mousePos.y);
+        ctx.lineTo(mousePosRef.current.x, mousePosRef.current.y);
         ctx.stroke();
         ctx.setLineDash([]);
       }
@@ -395,7 +409,7 @@ export default function PenaltyGame() {
 
     render();
     return () => cancelAnimationFrame(animationFrameId);
-  }, [gameState, mousePos, netShake]);
+  }, [gameState]);
 
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     // We already handle mouse move, this could be for starting a swipe if needed
@@ -412,10 +426,10 @@ export default function PenaltyGame() {
     const touch = e.touches[0];
     const scaleX = CANVAS_WIDTH / rect.width;
     const scaleY = CANVAS_HEIGHT / rect.height;
-    setMousePos({
+    mousePosRef.current = {
       x: (touch.clientX - rect.left) * scaleX,
       y: (touch.clientY - rect.top) * scaleY
-    });
+    };
   };
 
   const handleTouchMove = (e: React.TouchEvent<HTMLCanvasElement>) => {
@@ -425,10 +439,10 @@ export default function PenaltyGame() {
     const touch = e.touches[0];
     const scaleX = CANVAS_WIDTH / rect.width;
     const scaleY = CANVAS_HEIGHT / rect.height;
-    setMousePos({
+    mousePosRef.current = {
       x: (touch.clientX - rect.left) * scaleX,
       y: (touch.clientY - rect.top) * scaleY
-    });
+    };
   };
 
   const handleTouchEnd = (e: React.TouchEvent<HTMLCanvasElement>) => {
@@ -442,96 +456,76 @@ export default function PenaltyGame() {
     if (!rect) return;
     const scaleX = CANVAS_WIDTH / rect.width;
     const scaleY = CANVAS_HEIGHT / rect.height;
-    setMousePos({
+    mousePosRef.current = {
       x: (e.clientX - rect.left) * scaleX,
       y: (e.clientY - rect.top) * scaleY
-    });
-  };
-
-  // Helper to remove green background from sprites
-  const processImage = (img: HTMLImageElement): Promise<string> => {
-    return new Promise((resolve) => {
-      const runProcess = () => {
-        const canvas = document.createElement('canvas');
-        canvas.width = img.width;
-        canvas.height = img.height;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return resolve(img.src);
-        ctx.drawImage(img, 0, 0);
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const data = imageData.data;
-
-        // More robust green removal: check if Green is dominant
-        for (let i = 0; i < data.length; i += 4) {
-          const r = data[i];
-          const g = data[i + 1];
-          const b = data[i + 2];
-          // Aggressively remove any pixel where green dominates
-          if (g > 40 && g > r && g > b) {
-            data[i + 3] = 0;
-          }
-        }
-        ctx.putImageData(imageData, 0, 0);
-        resolve(canvas.toDataURL());
-      };
-
-      if (img.complete && img.naturalWidth > 0) {
-        runProcess();
-      } else {
-        img.onload = runProcess;
-        img.onerror = () => resolve(img.src);
-      }
-    });
-  };
-
-  const [processedSprites, setProcessedSprites] = useState<Record<string, string>>({});
-
-  useEffect(() => {
-    const load = async () => {
-      const paths = ['/sprites/shooter.png', '/sprites/keeper_idle.png', '/sprites/keeper_dive_left.png', '/sprites/keeper_dive_right.png', '/sprites/defender.png'];
-      const newProcessed: Record<string, string> = {};
-
-      for (const path of paths) {
-        const img = new Image();
-        img.src = path;
-        img.crossOrigin = "anonymous";
-        newProcessed[path] = await processImage(img);
-      }
-      setProcessedSprites(newProcessed);
     };
-    load();
-  }, []);
+  };
 
-  // Update SPRITES with processed versions
-  useEffect(() => {
-    if (processedSprites['/sprites/shooter.png']) SPRITES.shooter.src = processedSprites['/sprites/shooter.png'];
-    if (processedSprites['/sprites/keeper_idle.png']) SPRITES.keeperIdle.src = processedSprites['/sprites/keeper_idle.png'];
-    if (processedSprites['/sprites/keeper_dive_left.png']) SPRITES.keeperDiveL.src = processedSprites['/sprites/keeper_dive_left.png'];
-    if (processedSprites['/sprites/keeper_dive_right.png']) SPRITES.keeperDiveR.src = processedSprites['/sprites/keeper_dive_right.png'];
-    if (processedSprites['/sprites/defender.png']) SPRITES.defender.src = processedSprites['/sprites/defender.png'];
-  }, [processedSprites]);
+
 
   // Main UI
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-[#001D4A] p-4 font-montserrat select-none touch-none overflow-hidden">
+    <div
+      className="flex flex-col items-center justify-center min-h-screen p-2 sm:p-4 font-montserrat select-none touch-none overflow-hidden"
+      style={{
+        '--brand-primary': activeConfig.colors.primary,
+        '--brand-secondary': activeConfig.colors.secondary,
+        '--brand-bg': activeConfig.colors.background,
+        '--brand-gold': activeConfig.colors.accentGold,
+        backgroundColor: activeConfig.colors.background,
+      } as React.CSSProperties}
+    >
       {/* Branding Header */}
-      <div className="w-full max-w-[800px] flex justify-between items-center mb-4 text-white">
+      <div className="w-full max-w-[800px] flex justify-between items-center mb-2 sm:mb-4 text-white px-1">
         <div className="flex items-center gap-2">
-          <Trophy className="text-[#FFD700]" size={24} />
-          <span className="font-extrabold text-xl tracking-tighter">BRUT <span className="text-[#E31837]">MUNDIAL EXPERIENCE</span></span>
+          <Trophy style={{ color: activeConfig.colors.accentGold }} size={24} />
+          <span className="font-extrabold text-lg sm:text-xl tracking-tighter">{activeConfig.brand.name} <span style={{ color: activeConfig.colors.primary }}>{activeConfig.brand.productLabel}</span></span>
         </div>
-        <div className="text-sm font-medium opacity-80 uppercase tracking-widest text-right">
-          Brut Mundial<br />Experience
+        <div className="hidden sm:block text-sm font-medium opacity-80 uppercase tracking-widest text-right">
+          {activeConfig.brand.name} {activeConfig.brand.productLabel.split(' ')[0]}<br />{activeConfig.brand.productLabel.split(' ').slice(1).join(' ')}
+        </div>
+      </div>
+
+      {/* Score bar - outside canvas, above it */}
+      <div className="w-full max-w-[800px] flex justify-between items-center gap-2 mb-2 sm:mb-3 px-2">
+        <div
+          className="flex-1 bg-black/40 backdrop-blur rounded-xl px-4 py-2 flex items-center justify-between border-2"
+          style={{ borderColor: activeConfig.colors.secondary }}
+        >
+          <span className="text-white/80 text-xs sm:text-sm font-bold tracking-widest">
+            {activeConfig.copy.scoreLabel}
+          </span>
+          <span
+            className="text-2xl sm:text-3xl font-black"
+            style={{ color: activeConfig.colors.primary }}
+          >
+            {score}
+          </span>
+        </div>
+        <div
+          className="flex-1 bg-black/40 backdrop-blur rounded-xl px-4 py-2 flex items-center justify-between border-2"
+          style={{ borderColor: activeConfig.colors.secondary }}
+        >
+          <span className="text-white/80 text-xs sm:text-sm font-bold tracking-widest">
+            {activeConfig.copy.attemptsLabel}
+          </span>
+          <span className="text-2xl sm:text-3xl font-black text-white">
+            {shotsTaken}/{TOTAL_SHOTS}
+          </span>
         </div>
       </div>
 
       <div
         ref={containerRef}
-        className="relative shadow-2xl rounded-2xl overflow-hidden border-4 border-[#0033A0]"
-        style={{ width: CANVAS_WIDTH, height: CANVAS_HEIGHT }}
+        className="relative shadow-2xl rounded-2xl overflow-hidden border-2 sm:border-4"
+        style={{
+          borderColor: activeConfig.colors.secondary,
+          width: 'min(100%, calc((100dvh - 12rem) * 4 / 3))',
+          maxWidth: CANVAS_WIDTH,
+          aspectRatio: `${CANVAS_WIDTH} / ${CANVAS_HEIGHT}`,
+        }}
       >
-
-
         <canvas
           ref={canvasRef}
           width={CANVAS_WIDTH}
@@ -542,21 +536,9 @@ export default function PenaltyGame() {
           onTouchStart={handleTouchStart}
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
-          className="cursor-crosshair"
-          onClick={handleShoot}
+          className="cursor-crosshair w-full h-full"
+          style={{ touchAction: 'none' }}
         />
-
-        {/* HUD Overlay */}
-        <div className="absolute top-[70px] left-0 w-full px-6 flex justify-between items-start pointer-events-none">
-          <div className="bg-black/60 backdrop-blur-md p-3 rounded-xl border border-white/20">
-            <div className="text-[10px] text-white/60 uppercase font-bold tracking-widest mb-1">Goles</div>
-            <div className="text-3xl font-black text-[#E31837] leading-none">{score}</div>
-          </div>
-          <div className="bg-black/60 backdrop-blur-md p-3 rounded-xl border border-white/20 text-right">
-            <div className="text-[10px] text-white/60 uppercase font-bold tracking-widest mb-1">Intentos</div>
-            <div className="text-xl font-black text-white leading-none">{shotsTaken} / {TOTAL_SHOTS}</div>
-          </div>
-        </div>
 
         {/* Result Overlay */}
         <AnimatePresence>
@@ -567,18 +549,20 @@ export default function PenaltyGame() {
               exit={{ opacity: 0 }}
               className="absolute inset-0 flex items-center justify-center bg-black/60 backdrop-blur-[2px] z-20"
             >
-              <div className="bg-white p-10 rounded-[40px] shadow-2xl text-center min-w-[320px] border-8 border-[#0033A0]">
-                <h2 className={`text-6xl font-black mb-2 italic uppercase tracking-tighter ${result === 'GOAL' ? 'text-[#E31837]' :
-                  result === 'SAVED' ? 'text-[#0033A0]' : 'text-slate-400'
-                  }`}>
-                  {result === 'GOAL' ? '¡GOL!' : result === 'SAVED' ? '¡ATAJADA!' : '¡FUERA!'}
+              <div className="bg-white p-10 rounded-[40px] shadow-2xl text-center min-w-[320px] border-8" style={{ borderColor: activeConfig.colors.secondary }}>
+                <h2
+                  className="text-6xl font-black mb-2 italic uppercase tracking-tighter"
+                  style={{ color: result === 'GOAL' ? activeConfig.colors.primary : result === 'SAVED' ? activeConfig.colors.secondary : '#94a3b8' }}
+                >
+                  {result === 'GOAL' ? activeConfig.copy.result.goal : result === 'SAVED' ? activeConfig.copy.result.save : activeConfig.copy.result.miss}
                 </h2>
                 <div className="h-2 w-24 bg-slate-100 mx-auto my-6 rounded-full" />
                 <button
                   onClick={nextShot}
-                  className="w-full py-5 bg-[#E31837] text-white rounded-2xl font-black uppercase text-xl hover:bg-[#c41530] transition-all active:scale-95 shadow-lg"
+                  className="w-full py-5 text-white rounded-2xl font-black uppercase text-xl transition-all active:scale-95 shadow-lg"
+                  style={{ backgroundColor: activeConfig.colors.primary }}
                 >
-                  Siguiente
+                  {activeConfig.copy.nextButton}
                 </button>
               </div>
             </motion.div>
@@ -591,7 +575,8 @@ export default function PenaltyGame() {
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
-              className="absolute inset-0 flex items-center justify-center bg-[#001D4A]/95 backdrop-blur-xl z-30"
+              className="absolute inset-0 flex items-center justify-center backdrop-blur-xl z-30"
+              style={{ backgroundColor: `${activeConfig.colors.background}f2` }}
             >
               <div className="text-center max-w-lg w-full p-4 px-6">
                 <motion.div
@@ -606,29 +591,30 @@ export default function PenaltyGame() {
                     </div>
                   )}
 
-                  <h2 className="text-2xl font-black text-white mb-1 uppercase tracking-tighter italic">Finalizado</h2>
+                  <h2 className="text-2xl font-black text-white mb-1 uppercase tracking-tighter italic">{activeConfig.copy.finishedLabel}</h2>
                   <p className="text-white/60 mb-2 text-sm font-bold uppercase tracking-widest">
-                    Total Goles: <span className="text-[#E31837] text-xl">{score}</span>
+                    {activeConfig.copy.totalGoalsLabel}: <span style={{ color: activeConfig.colors.primary }} className="text-xl">{score}</span>
                   </p>
 
                   {/* Bottom row: message + button side by side */}
                   <div className="flex items-stretch gap-3">
-                    {score > 0 ? (
+                    {score >= activeConfig.game.goalsToWinPrize ? (
                       <div className="flex-1 p-3 bg-green-500/20 border border-green-500/50 rounded-xl text-green-300 font-bold text-xs flex items-center justify-center">
-                        ¡Felicidades! Presenta esta pantalla para reclamar tu premio.
+                        {activeConfig.copy.prize.win}
                       </div>
                     ) : (
                       <div className="flex-1 p-3 bg-red-500/20 border border-red-500/50 rounded-xl text-red-300 font-bold text-xs flex items-center justify-center">
-                        Sigue intentando para ganar premios Brut.
+                        {activeConfig.copy.prize.loss}
                       </div>
                     )}
 
                     <button
                       onClick={restartGame}
-                      className="flex-shrink-0 px-6 py-3 bg-white text-[#0033A0] rounded-xl font-black text-sm uppercase hover:bg-slate-100 transition-all shadow-xl flex items-center justify-center gap-2"
+                      className="flex-shrink-0 px-6 py-3 bg-white rounded-xl font-black text-sm uppercase hover:bg-slate-100 transition-all shadow-xl flex items-center justify-center gap-2"
+                      style={{ color: activeConfig.colors.secondary }}
                     >
                       <RotateCcw className="w-4 h-4" />
-                      Jugar de nuevo
+                      {activeConfig.copy.playAgainButton}
                     </button>
                   </div>
                 </motion.div>
@@ -647,17 +633,18 @@ export default function PenaltyGame() {
                 e.stopPropagation();
                 setIsGameStarted(true);
               }}
-              className="inline-flex items-center gap-3 bg-white text-[#0033A0] px-10 py-5 rounded-full text-lg font-black uppercase tracking-widest shadow-[0_20px_50px_rgba(0,0,0,0.3)] border-b-8 border-slate-300 pointer-events-auto"
+              className="inline-flex items-center gap-3 bg-white px-10 py-5 rounded-full text-lg font-black uppercase tracking-widest shadow-[0_20px_50px_rgba(0,0,0,0.3)] border-b-8 border-slate-300 pointer-events-auto"
+              style={{ color: activeConfig.colors.secondary }}
             >
-              <Target className="w-6 h-6 text-[#E31837]" />
-              Apunta y patea
+              <Target className="w-6 h-6" style={{ color: activeConfig.colors.primary }} />
+              {activeConfig.copy.startButton}
             </motion.button>
           </div>
         )}
       </div>
 
       <div className="mt-8 text-white/30 text-[10px] max-w-[600px] text-center uppercase tracking-[3px] font-bold">
-        <p>Brut Mundial 2026 • Marketing Experience</p>
+        <p>{activeConfig.copy.footer}</p>
       </div>
     </div>
   );
